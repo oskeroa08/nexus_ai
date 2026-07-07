@@ -1,0 +1,13 @@
+PySide6
+edge-tts
+SpeechRecognition
+pyaudio
+openai
+pynput
+psutil
+pyinstaller
+torch
+torchaudio
+soundfile
+numpy
+pyttsx3

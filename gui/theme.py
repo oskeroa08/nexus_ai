@@ -1,0 +1,59 @@
+"""Константы премиум-темы Nexus AI."""
+
+# Цвета
+COLOR_BG = "#05070D"
+COLOR_PANEL = "#0D1220"
+COLOR_CARD = "rgba(255, 255, 255, 0.03)"
+COLOR_CARD_HOVER = "rgba(255, 255, 255, 0.06)"
+COLOR_PRIMARY = "#57E8FF"
+COLOR_TEXT = "#F5FAFF"
+COLOR_TEXT_SECONDARY = "#8FA4C4"
+COLOR_BORDER = "rgba(255, 255, 255, 0.08)"
+COLOR_BORDER_FOCUS = "rgba(87, 232, 255, 0.35)"
+
+# Пузыри чата
+COLOR_USER_BUBBLE = "#0D1220"
+COLOR_ASSISTANT_BUBBLE = "rgba(87, 232, 255, 0.08)"
+COLOR_SYSTEM_BUBBLE = "rgba(255, 255, 255, 0.03)"
+
+# Отступы (система 8pt)
+SPACE_XS = 8
+SPACE_SM = 16
+SPACE_MD = 24
+SPACE_LG = 32
+SPACE_XL = 48
+SPACE_XXL = 64
+
+# Шрифты
+FONT_FAMILY = '"Segoe UI Variable", "Segoe UI", "Inter", sans-serif'
+FONT_TITLE_SIZE = 22
+FONT_STATUS_SIZE = 15
+FONT_BODY_SIZE = 14
+FONT_CAPTION_SIZE = 12
+
+# Размеры
+TOP_BAR_HEIGHT = 64
+ICON_BUTTON_SIZE = 40
+BUBBLE_MAX_WIDTH = 420
+BUBBLE_RADIUS = 20
+WINDOW_MIN_WIDTH = 520
+WINDOW_MIN_HEIGHT = 760
+WINDOW_DEFAULT_WIDTH = 560
+WINDOW_DEFAULT_HEIGHT = 820
+
+# Визуализатор
+VISUALIZER_MIN_SIZE = 300
+COLOR_GLOW = "#57E8FF"
+COLOR_CORE = "#57E8FF"
+COLOR_PARTICLE = "#8FDFFF"
+
+# AI-провайдеры
+PROVIDER_OPENAI = "openai"
+PROVIDER_GROQ = "groq"
+PROVIDER_NONE = "none"
+
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+GROQ_MODEL = "llama-3.3-70b-versatile"
+
+OPENAI_MODELS = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
+GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]
