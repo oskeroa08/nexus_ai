@@ -18,13 +18,42 @@ RATE = 16000
 
 
 def load_config() -> dict:
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as FileNotFoundError:
+        print(f"[AudioManager] Конфиг не найден или повреждён, создаём новый")
+        default_config = {
+            "wake_word": "Нексус",
+            "ai_provider": "none",
+            "openai_api_key": "",
+            "openai_model": "gpt-4o-mini",
+            "groq_api_key": "",
+            "groq_model": "llama-3.3-70b-versatile",
+            "input_device_index": None,
+            "output_device_index": None,
+            "energy_threshold": 300,
+            "tts_provider": "silero",
+            "silero_voice": "aidar",
+            "tts_speed": 1.0,
+            "tts_pitch": 1.0,
+            "tts_volume_level": 1.0,
+            "tts_voice": "ru-RU-SvetlanaNeural",
+            "tts_rate": "+0%",
+            "tts_volume": "+0%",
+            "muted": False,
+            "language": "ru-RU"
+        }
+        save_config(default_config)
+        return default_config
 
 
 def save_config(config: dict) -> None:
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=4)
+    try:
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"[AudioManager] Ошибка сохранения конфига: {e}")
 
 
 class AudioManager:

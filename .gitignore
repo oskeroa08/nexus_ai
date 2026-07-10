@@ -6,3 +6,8 @@ __pycache__/
 *.log
 *.wav
 temp/
+.aider*
+build/
+dist/
+*.spec
+assets/silero/

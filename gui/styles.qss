@@ -198,6 +198,22 @@ QWidget#messageRow {
     background: transparent;
 }
 
+/* Сообщение об ошибке */
+QFrame#errorMessage {
+    background-color: rgba(255, 77, 79, 0.12);
+    border: 1px solid rgba(255, 77, 79, 0.3);
+    border-radius: 16px;
+    padding: 16px;
+}
+
+QLabel#errorText {
+    color: #FF4D4F;
+    font-size: 14px;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
 /* ── Настройки ── */
 QDialog#settingsDialog {
     background-color: #05070D;
@@ -244,27 +260,27 @@ QLineEdit:focus, QComboBox:focus {
     background-color: rgba(255, 255, 255, 0.06);
 }
 
-QComboBox::drop-down {
-    border: none;
-    width: 28px;
-}
-
-QComboBox::down-arrow {
-    image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #8FA4C4;
-    margin-right: 12px;
-}
-
 QComboBox QAbstractItemView {
     background-color: #0D1220;
     color: #F5FAFF;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
-    padding: 4px;
+    padding: 8px;
     selection-background-color: rgba(87, 232, 255, 0.15);
     outline: none;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 32px;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #8FA4C4;
+    margin-right: 12px;
 }
 
 QCheckBox {

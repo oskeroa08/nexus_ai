@@ -1,9 +1,12 @@
+
 """Главное окно Nexus AI — премиум glassmorphism UI."""
 
 import os
+import sys
 from datetime import datetime
 
 from PySide6.QtCore import Q_ARG, QMetaObject, QObject, Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -19,6 +22,8 @@ from PySide6.QtWidgets import (
 from core.audio_manager import AudioManager, load_config, save_config
 from core.speech_engine import SpeechEngine
 from core.system_commands import SystemCommands
+from gui.chat_history import ChatHistory
+from gui.commands_dialog import CommandsDialog
 from gui.settings_window import SettingsWindow
 from gui.theme import (
     SPACE_LG,
@@ -40,6 +45,7 @@ class VoiceWorker(QObject):
     status_changed = Signal(str)
     user_message = Signal(str)
     assistant_message = Signal(str)
+    error_message = Signal(str)
     visualizer_state = Signal(str)
     speak_requested = Signal(str)
 
@@ -65,7 +71,14 @@ class VoiceWorker(QObject):
                 QThread.msleep(500)
                 continue
 
-            config = load_config()
+            try:
+                config = load_config()
+            except Exception as e:
+                print(f"[VoiceWorker] Ошибка загрузки конфига: {e}")
+                self.error_message.emit("Ошибка загрузки конфигурации")
+                QThread.msleep(500)
+                continue
+
             wake_word = config.get("wake_word", "Нексус")
             device_index = config.get("input_device_index")
 
@@ -80,6 +93,7 @@ class VoiceWorker(QObject):
                 )
             except Exception as e:
                 print(f"[VoiceWorker] Ошибка прослушивания: {e}")
+                self.error_message.emit(f"Ошибка прослушивания: {e}")
                 QThread.msleep(500)
                 continue
 
@@ -89,28 +103,36 @@ class VoiceWorker(QObject):
             if not text:
                 continue
 
-            command = SpeechEngine.extract_command(text, wake_word)
-            if not command:
-                continue
+            try:
+                command = SpeechEngine.extract_command(text, wake_word)
+                if not command:
+                    continue
 
-            self._handle_command(text, command)
+                self._handle_command(text, command)
+            except Exception as e:
+                print(f"[VoiceWorker] Ошибка обработки команды: {e}")
+                self.error_message.emit(f"Ошибка обработки: {e}")
 
     def _handle_command(self, full_text: str, command: str) -> None:
         """Обработка распознанной команды."""
-        self.visualizer_state.emit(AudioVisualizer.STATE_WAKE)
-        self.status_changed.emit("Думаю...")
-        self.user_message.emit(full_text)
+        try:
+            self.visualizer_state.emit(AudioVisualizer.STATE_WAKE)
+            self.status_changed.emit("Думаю...")
+            self.user_message.emit(full_text)
 
-        self.visualizer_state.emit(AudioVisualizer.STATE_PROCESSING)
-        response = self._commands.process(command)
-        self.assistant_message.emit(response)
+            self.visualizer_state.emit(AudioVisualizer.STATE_PROCESSING)
+            response = self._commands.process(command)
+            self.assistant_message.emit(response)
 
-        config = load_config()
-        if not config.get("muted", False):
-            self.speak_requested.emit(response)
+            config = load_config()
+            if not config.get("muted", False):
+                self.speak_requested.emit(response)
 
-        self.visualizer_state.emit(AudioVisualizer.STATE_IDLE)
-        self.status_changed.emit("Слушаю...")
+            self.visualizer_state.emit(AudioVisualizer.STATE_IDLE)
+            self.status_changed.emit("Слушаю...")
+        except Exception as e:
+            print(f"[VoiceWorker] Ошибка в handle_command: {e}")
+            self.error_message.emit(f"Ошибка: {e}")
 
 
 class TTSWorker(QObject):
@@ -118,6 +140,7 @@ class TTSWorker(QObject):
 
     speak_start = Signal()
     speak_end = Signal()
+    error_message = Signal(str)
 
     def __init__(self, speech: SpeechEngine):
         super().__init__()
@@ -129,7 +152,11 @@ class TTSWorker(QObject):
 
     @Slot(str)
     def speak(self, text: str) -> None:
-        self._speech.speak(text, blocking=True)
+        try:
+            self._speech.speak(text, blocking=True)
+        except Exception as e:
+            print(f"[TTSWorker] Ошибка озвучки: {e}")
+            self.error_message.emit(f"Ошибка озвучки: {e}")
 
 
 class TTSPreloadWorker(QObject):
@@ -143,47 +170,12 @@ class TTSPreloadWorker(QObject):
 
     @Slot()
     def run(self) -> None:
-        self._speech.preload_tts()
-        self.preload_done.emit(self._speech.silero_loaded)
-
-
-class ChatBubble(QFrame):
-    """Пузырь сообщения с текстом и временем."""
-
-    def __init__(self, text: str, role: str, max_width: int, parent=None):
-        super().__init__(parent)
-        self._role = role
-        self._max_width = max_width
-        self.setObjectName("userBubble" if role == "user" else "assistantBubble")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 16, 12)
-        layout.setSpacing(4)
-
-        self._text_label = QLabel(text)
-        self._text_label.setWordWrap(True)
-        self._text_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self._text_label.setObjectName("bubbleText")
-        layout.addWidget(self._text_label)
-
-        time_str = datetime.now().strftime("%H:%M")
-        self._time_label = QLabel(time_str)
-        self._time_label.setObjectName("bubbleTime")
-        self._time_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight if role == "user" else Qt.AlignmentFlag.AlignLeft
-        )
-        layout.addWidget(self._time_label)
-
-        self._apply_max_width()
-
-    def _apply_max_width(self) -> None:
-        self.setMaximumWidth(self._max_width)
-        self._text_label.setMaximumWidth(self._max_width - 28)
-
-    def update_max_width(self, max_width: int) -> None:
-        self._max_width = max_width
-        self._apply_max_width()
-        self.adjustSize()
+        try:
+            self._speech.preload_tts()
+            self.preload_done.emit(self._speech.silero_loaded)
+        except Exception as e:
+            print(f"[TTSPreloadWorker] Ошибка предзагрузки: {e}")
+            self.preload_done.emit(False)
 
 
 class MainWindow(QMainWindow):
@@ -199,6 +191,7 @@ class MainWindow(QMainWindow):
         self._paused = False
         self._has_messages = False
         self._empty_label = None
+        self._chat_history = None
 
         self._setup_window()
         self._build_ui()
@@ -216,26 +209,22 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.resize(WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT)
 
+        # Установка иконки приложения
+        if getattr(sys, 'frozen', False):
+            # Если запущено из EXE
+            base_path = sys._MEIPASS
+        else:
+            # Если запущено из исходного кода
+            base_path = os.path.dirname(os.path.dirname(__file__))
+        
+        icon_path = os.path.join(base_path, "icon.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
         styles_path = os.path.join(os.path.dirname(__file__), "styles.qss")
         if os.path.exists(styles_path):
             with open(styles_path, "r", encoding="utf-8") as f:
                 self.setStyleSheet(f.read())
-
-    def _bubble_max_width(self) -> int:
-        """70% ширины окна для пузырей."""
-        return max(int(self.width() * 0.7), 200)
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        max_w = self._bubble_max_width()
-        for i in range(self._chat_layout.count()):
-            item = self._chat_layout.itemAt(i)
-            if item and item.widget():
-                widget = item.widget()
-                if isinstance(widget, QWidget) and widget.objectName() == "messageRow":
-                    bubble = widget.findChild(ChatBubble)
-                    if isinstance(bubble, ChatBubble):
-                        bubble.update_max_width(max_w)
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -250,9 +239,12 @@ class MainWindow(QMainWindow):
         root.addWidget(self._build_visualizer(), stretch=2)
         root.addWidget(self._build_chat_area(), stretch=3)
 
-        config = load_config()
-        self._mute_btn.setChecked(config.get("muted", False))
-        self._update_mute_button()
+        try:
+            config = load_config()
+            self._mute_btn.setChecked(config.get("muted", False))
+            self._update_mute_button()
+        except Exception as e:
+            print(f"[MainWindow] Ошибка загрузки конфига: {e}")
 
     def _build_top_bar(self) -> QFrame:
         bar = QFrame()
@@ -267,14 +259,14 @@ class MainWindow(QMainWindow):
         title.setObjectName("titleLabel")
         layout.addWidget(title)
 
-        layout.addStretch(1)
+        layout.addStretch()
 
         self._status_label = QLabel("Инициализация...")
         self._status_label.setObjectName("statusLabel")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._status_label)
 
-        layout.addStretch(1)
+        layout.addStretch()
 
         self._mic_btn = QPushButton("●")
         self._mic_btn.setObjectName("iconButton")
@@ -290,6 +282,12 @@ class MainWindow(QMainWindow):
         self._mute_btn.setToolTip("Вкл/выкл звук")
         self._mute_btn.clicked.connect(self._toggle_mute)
         layout.addWidget(self._mute_btn)
+
+        commands_btn = QPushButton("📝")
+        commands_btn.setObjectName("iconButton")
+        commands_btn.setToolTip("Управление командами")
+        commands_btn.clicked.connect(self._open_commands)
+        layout.addWidget(commands_btn)
 
         settings_btn = QPushButton("⚙")
         settings_btn.setObjectName("iconButton")
@@ -326,13 +324,8 @@ class MainWindow(QMainWindow):
         self._chat_scroll.setWidgetResizable(True)
         self._chat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self._chat_container = QWidget()
-        self._chat_layout = QVBoxLayout(self._chat_container)
-        self._chat_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._chat_layout.setSpacing(SPACE_MD)
-        self._chat_layout.setContentsMargins(SPACE_XS, SPACE_XS, SPACE_XS, SPACE_XS)
-
-        self._chat_scroll.setWidget(self._chat_container)
+        self._chat_history = ChatHistory()
+        self._chat_scroll.setWidget(self._chat_history)
         layout.addWidget(self._chat_scroll)
 
         return frame
@@ -347,8 +340,9 @@ class MainWindow(QMainWindow):
 
         self._voice_thread.started.connect(self._voice_worker.run_loop)
         self._voice_worker.status_changed.connect(self._set_status)
-        self._voice_worker.user_message.connect(lambda t: self._add_chat_message(t, "user"))
-        self._voice_worker.assistant_message.connect(lambda t: self._add_chat_message(t, "assistant"))
+        self._voice_worker.user_message.connect(self._add_user_message)
+        self._voice_worker.assistant_message.connect(self._add_assistant_message)
+        self._voice_worker.error_message.connect(self._add_error_message)
         self._voice_worker.visualizer_state.connect(self._visualizer.set_state)
         self._voice_worker.speak_requested.connect(self._speak_response)
 
@@ -362,6 +356,7 @@ class MainWindow(QMainWindow):
             lambda: self._visualizer.set_state(AudioVisualizer.STATE_SPEAKING)
         )
         self._tts_worker.speak_end.connect(self._on_speak_finished)
+        self._tts_worker.error_message.connect(self._add_error_message)
         self._tts_thread.start()
 
     def _setup_tts_preload(self) -> None:
@@ -387,65 +382,51 @@ class MainWindow(QMainWindow):
 
     def _speak_response(self, text: str) -> None:
         """Отправка текста на озвучку через TTS-поток."""
-        QMetaObject.invokeMethod(
-            self._tts_worker,
-            "speak",
-            Qt.ConnectionType.QueuedConnection,
-            Q_ARG(str, text),
-        )
+        try:
+            QMetaObject.invokeMethod(
+                self._tts_worker,
+                "speak",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, text),
+            )
+        except Exception as e:
+            print(f"[MainWindow] Ошибка отправки на озвучку: {e}")
 
     def _start_audio_monitor(self) -> None:
-        config = load_config()
-        device_index = config.get("input_device_index")
-
-        def on_level(level: float):
-            self.audio_level.emit(level)
-
         try:
+            config = load_config()
+            device_index = config.get("input_device_index")
+
+            def on_level(level: float):
+                self.audio_level.emit(level)
+
             self._audio.start_level_monitor(on_level, device_index)
         except Exception as e:
             print(f"[MainWindow] Ошибка аудио-монитора: {e}")
+            self._add_error_message(f"Ошибка аудио: {e}")
 
     def _set_status(self, text: str) -> None:
         self._status_label.setText(text)
 
     def _show_empty_state(self) -> None:
         """Пустое состояние чата."""
-        config = load_config()
-        wake_word = config.get("wake_word", "Нексус")
-        self._empty_label = QLabel(f"Скажи «{wake_word}» и задай вопрос")
-        self._empty_label.setObjectName("emptyStateLabel")
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setWordWrap(True)
-        self._chat_layout.addWidget(self._empty_label)
+        pass
 
     def _remove_empty_state(self) -> None:
-        if self._empty_label:
-            self._chat_layout.removeWidget(self._empty_label)
-            self._empty_label.deleteLater()
-            self._empty_label = None
+        pass
 
-    def _add_chat_message(self, text: str, role: str) -> None:
+    def _add_user_message(self, text: str) -> None:
         if not self._has_messages:
-            self._remove_empty_state()
             self._has_messages = True
+        self._chat_history.add_user_message(text)
+        QTimer.singleShot(50, self._scroll_to_bottom)
 
-        row = QWidget()
-        row.setObjectName("messageRow")
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
+    def _add_assistant_message(self, text: str) -> None:
+        self._chat_history.add_assistant_message(text)
+        QTimer.singleShot(50, self._scroll_to_bottom)
 
-        bubble = ChatBubble(text, role, self._bubble_max_width())
-
-        if role == "user":
-            row_layout.addStretch()
-            row_layout.addWidget(bubble)
-        else:
-            row_layout.addWidget(bubble)
-            row_layout.addStretch()
-
-        count = self._chat_layout.count()
-        self._chat_layout.insertWidget(count, row)
+    def _add_error_message(self, text: str) -> None:
+        self._chat_history.add_error_message(text)
         QTimer.singleShot(50, self._scroll_to_bottom)
 
     def _scroll_to_bottom(self) -> None:
@@ -466,10 +447,14 @@ class MainWindow(QMainWindow):
         self._mic_btn.style().polish(self._mic_btn)
 
     def _toggle_mute(self) -> None:
-        config = load_config()
-        config["muted"] = self._mute_btn.isChecked()
-        save_config(config)
-        self._update_mute_button()
+        try:
+            config = load_config()
+            config["muted"] = self._mute_btn.isChecked()
+            save_config(config)
+            self._update_mute_button()
+        except Exception as e:
+            print(f"[MainWindow] Ошибка конфига: {e}")
+            self._add_error_message(f"Ошибка конфига: {e}")
 
     def _update_mute_button(self) -> None:
         self._mute_btn.setText("⊘" if self._mute_btn.isChecked() else "♪")
@@ -485,30 +470,45 @@ class MainWindow(QMainWindow):
 
         self._paused = not self._mic_btn.isChecked()
         self._voice_worker.set_paused(self._paused)
+        
+    def _open_commands(self) -> None:
+        self._voice_worker.set_paused(True)
+        self._paused = True
+        self._set_status("Управление командами")
+
+        dialog = CommandsDialog(self)
+        dialog.exec()
+
+        self._paused = not self._mic_btn.isChecked()
+        self._voice_worker.set_paused(self._paused)
 
     def _on_settings_saved(self) -> None:
-        self._audio.stop_level_monitor()
-        config = load_config()
-        self._mute_btn.setChecked(config.get("muted", False))
-        self._update_mute_button()
-
-        def on_level(level: float):
-            self.audio_level.emit(level)
-
         try:
-            self._audio.start_level_monitor(on_level, config.get("input_device_index"))
-        except Exception as e:
-            print(f"[MainWindow] Перезапуск монитора: {e}")
+            self._audio.stop_level_monitor()
+            config = load_config()
+            self._mute_btn.setChecked(config.get("muted", False))
+            self._update_mute_button()
 
-        if not self._paused:
-            self._set_status("Слушаю...")
+            def on_level(level: float):
+                self.audio_level.emit(level)
+
+            self._audio.start_level_monitor(on_level, config.get("input_device_index"))
+
+            if not self._paused:
+                self._set_status("Слушаю...")
+        except Exception as e:
+            print(f"[MainWindow] Ошибка настроек: {e}")
+            self._add_error_message(f"Ошибка настроек: {e}")
 
     def closeEvent(self, event) -> None:
-        self._voice_worker.stop()
-        self._voice_thread.quit()
-        self._voice_thread.wait(3000)
-        self._tts_thread.quit()
-        self._tts_thread.wait(3000)
-        self._speech.stop_speaking()
-        self._audio.cleanup()
+        try:
+            self._voice_worker.stop()
+            self._voice_thread.quit()
+            self._voice_thread.wait(3000)
+            self._tts_thread.quit()
+            self._tts_thread.wait(3000)
+            self._speech.stop_speaking()
+            self._audio.cleanup()
+        except Exception as e:
+            print(f"[MainWindow] Ошибка закрытия: {e}")
         event.accept()

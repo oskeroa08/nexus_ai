@@ -1,3 +1,4 @@
+
 """Движок распознавания и синтеза речи."""
 
 import asyncio
@@ -10,6 +11,7 @@ from typing import Callable, Optional
 import edge_tts
 import numpy as np
 import speech_recognition as sr
+import torch
 
 from core.audio_manager import load_config
 
@@ -23,7 +25,7 @@ SILERO_SAMPLE_RATE = 48000
 
 
 class SileroEngine:
-    """Оффлайн TTS через Silero v3_4."""
+    """Оффлайн TTS через Silero v5_5_ru (загружается из локальных файлов)."""
 
     def __init__(self):
         self._model = None
@@ -40,22 +42,55 @@ class SileroEngine:
     def load_error(self) -> Optional[str]:
         return self._load_error
 
+    def _get_local_model_dir(self):
+        """Получает путь к локальной папке с Silero моделью."""
+        import sys
+        if getattr(sys, 'frozen', False):
+            # Если запущено из EXE
+            base_path = sys._MEIPASS
+        else:
+            # Если запущено из исходного кода
+            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(base_path, "assets", "silero")
+
     def preload(self) -> bool:
-        """Загрузка модели Silero (вызывать из фонового потока)."""
         with self._lock:
             if self._loaded:
                 return True
             try:
                 import torch
-
                 self._device = torch.device("cpu")
-                self._model, _ = torch.hub.load(
-                    repo_or_dir="snakers4/silero-models",
-                    model="silero_tts",
-                    language="ru",
-                    speaker="v3_4",
-                    trust_repo=True,
-                )
+
+                local_dir = self._get_local_model_dir()
+                print(f"[Silero] Загружаем из локальной папки: {local_dir}")
+
+                # Загружаем локальную модель
+                if os.path.exists(local_dir):
+                    result = torch.hub.load(
+                        repo_or_dir=local_dir,
+                        model="silero_tts",
+                        language="ru",
+                        speaker="v5_5_ru",
+                        trust_repo=True,
+                        source='local'
+                    )
+                else:
+                    # Если локальная папка не найдена, пытаемся скачать из интернета как fallback
+                    print("[Silero] Локальная модель не найдена, пытаемся скачать...")
+                    result = torch.hub.load(
+                        repo_or_dir="snakers4/silero-models",
+                        model="silero_tts",
+                        language="ru",
+                        speaker="v5_5_ru",
+                        trust_repo=True,
+                    )
+
+                # Извлекаем модель из результата
+                if isinstance(result, tuple):
+                    self._model = result[0]
+                else:
+                    self._model = result
+
                 self._model.to(self._device)
                 self._loaded = True
                 self._load_error = None
@@ -64,6 +99,8 @@ class SileroEngine:
             except Exception as e:
                 self._load_error = str(e)
                 print(f"[Silero] Ошибка загрузки: {e}")
+                import traceback
+                traceback.print_exc()
                 return False
 
     def synthesize(
@@ -127,8 +164,11 @@ class SpeechEngine:
         self._pyttsx3_engine = None
 
     def _apply_energy_threshold(self) -> None:
-        config = load_config()
-        self._recognizer.energy_threshold = config.get("energy_threshold", 300)
+        try:
+            config = load_config()
+            self._recognizer.energy_threshold = config.get("energy_threshold", 300)
+        except Exception as e:
+            print(f"[SpeechEngine] Ошибка загрузки порога чувствительности: {e}")
 
     def set_speak_callbacks(self, on_start: Callable, on_end: Callable) -> None:
         """Колбэки вызываются из фонового потока — только emit сигналов!"""
@@ -137,9 +177,12 @@ class SpeechEngine:
 
     def preload_tts(self) -> None:
         """Предзагрузка Silero в фоне."""
-        config = load_config()
-        if config.get("tts_provider", TTS_SILERO) == TTS_SILERO:
-            self._silero.preload()
+        try:
+            config = load_config()
+            if config.get("tts_provider", TTS_SILERO) == TTS_SILERO:
+                self._silero.preload()
+        except Exception as e:
+            print(f"[SpeechEngine] Ошибка предзагрузки: {e}")
 
     @property
     def silero_loaded(self) -> bool:
@@ -203,19 +246,22 @@ class SpeechEngine:
     def speak(self, text: str, blocking: bool = True) -> None:
         if not text:
             return
-        config = load_config()
-        if config.get("muted", False):
-            return
+        try:
+            config = load_config()
+            if config.get("muted", False):
+                return
 
-        provider = config.get("tts_provider", TTS_SILERO)
-        if provider == TTS_NONE:
-            return
+            provider = config.get("tts_provider", TTS_SILERO)
+            if provider == TTS_NONE:
+                return
 
-        if blocking:
-            self._do_speak(text, config)
-        else:
-            thread = threading.Thread(target=self._do_speak, args=(text, config), daemon=True)
-            thread.start()
+            if blocking:
+                self._do_speak(text, config)
+            else:
+                thread = threading.Thread(target=self._do_speak, args=(text, config), daemon=True)
+                thread.start()
+        except Exception as e:
+            print(f"[SpeechEngine] Ошибка запуска синтеза: {e}")
 
     def stop_speaking(self) -> None:
         self._stop_speaking.set()
@@ -326,7 +372,7 @@ class SpeechEngine:
                     pass
 
     def _play_file(self, path: str) -> None:
-        """Воспроизведение аудиофайла через PowerShell."""
+        """Воспроизведение аудиофайла через PowerShell без консольного окна."""
         safe_path = path.replace("'", "''")
         script = (
             "Add-Type -AssemblyName presentationCore; "
@@ -339,10 +385,14 @@ class SpeechEngine:
             "Start-Sleep -Seconds $duration"
         )
         try:
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
             subprocess.run(
                 ["powershell", "-NoProfile", "-Command", script],
                 check=False,
                 capture_output=True,
+                startupinfo=startupinfo,
             )
         except Exception as e:
             print(f"[SpeechEngine] Ошибка воспроизведения: {e}")
